@@ -1,0 +1,14 @@
+spring:
+  application:
+    name: posts-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5341/postsDB
+    username:
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+
+server:
+  port: 9010
