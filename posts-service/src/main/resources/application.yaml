@@ -1,14 +1,12 @@
 spring:
-  application:
-    name: posts-service
-
   datasource:
-    url: jdbc:postgresql://localhost:5341/postsDB
-    username:
-    password:
+    url: jdbc:postgresql://localhost:5432/postsDB
+    username: postgres
+    password: 18ll_2002   # set during PostgreSQL installation
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: update
+    show-sql: true
 
 server:
   port: 9010

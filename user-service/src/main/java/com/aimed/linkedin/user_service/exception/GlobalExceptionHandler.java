@@ -1,4 +1,4 @@
-package com.aimed.linkedin.posts_service.exception;
+package com.aimed.linkedin.user_service.exception;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;

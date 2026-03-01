@@ -1,3 +1,17 @@
 spring:
   application:
     name: user-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/usersDB
+    username: postgres
+    password: 18ll_2002   # set during PostgreSQL installation
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+
+server:
+  port: 9020
+
+jwt:
+  secretKey: dfasdlfh343f335nkf98knfksdnfsnfa9fwehfonfoinfew902nefn02lnff

@@ -3,6 +3,7 @@ package com.aimed.linkedin.posts_service.service;
 import com.aimed.linkedin.posts_service.dto.PostCreateRequestDto;
 import com.aimed.linkedin.posts_service.dto.PostDto;
 import com.aimed.linkedin.posts_service.entity.Post;
+import com.aimed.linkedin.posts_service.exception.ResourceNotFoundException;
 import com.aimed.linkedin.posts_service.repository.PostsRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -11,7 +12,9 @@ import org.modelmapper.ModelMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.web.bind.annotation.RequestMapping;
 
+import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -30,5 +33,13 @@ public class PostsService {
     public PostDto getPostById(Long postId) {
         Post post = postsRepository.findById(postId).orElseThrow(() -> new ResourceNotFoundException("Post not found with the id: " + postId));
         return modelMapper.map(post, PostDto.class);
+    }
+
+    public List<PostDto> getAllPostsOfUser(Long userId) {
+        List<Post> posts = postsRepository.findByUserId(userId);
+        return posts.stream()
+                .map((element) -> modelMapper.map(element, PostDto.class))
+                .collect(Collectors.toList());
+
     }
 }
