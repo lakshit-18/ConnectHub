@@ -1,6 +1,9 @@
 spring:
   application:
     name: user-service
+  jackson:
+    mapper:
+      sort-properties-alphabetically: false
   datasource:
     url: jdbc:postgresql://localhost:5432/usersDB
     username: postgres
@@ -12,6 +15,15 @@ spring:
 
 server:
   port: 9020
+  servlet:
+    context-path: /users
 
 jwt:
   secretKey: dfasdlfh343f335nkf98knfksdnfsnfa9fwehfonfoinfew902nefn02lnff
+
+eureka:
+  instance:
+    prefer-ip-address: true
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka

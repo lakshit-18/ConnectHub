@@ -1,4 +1,9 @@
 spring:
+  application:
+    name: posts-service
+  jackson:
+    mapper:
+      sort-properties-alphabetically: false # Added just to get the response in the order I wanted not in alphabetical order tha the fucking Jackson wants
   datasource:
     url: jdbc:postgresql://localhost:5432/postsDB
     username: postgres
@@ -10,3 +15,13 @@ spring:
 
 server:
   port: 9010
+  servlet:
+    context-path: /posts
+
+eureka:
+  instance:
+    prefer-ip-address: true
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka
+
