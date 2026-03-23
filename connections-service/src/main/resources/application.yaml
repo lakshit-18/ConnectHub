@@ -2,10 +2,15 @@ spring:
   application:
     name: connections-service
   neo4j:
-    uri: neo4j://localhost:7687
-  authentication:
-    username: neo4j
-    password: 18ll_2002
+    uri: neo4j://127.0.0.1:7687
+    authentication:
+      username: neo4j
+      password: 18ll_2002
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.LongSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
 server:
   servlet:
@@ -13,6 +18,8 @@ server:
   port: 9030
 
 eureka:
+  instance:
+    prefer-ip-address: true
   client:
     service-url:
       defaultZone: http://localhost:8761/eureka/

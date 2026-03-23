@@ -1,0 +1,299 @@
+================================================================================
+                    ERRORS FACED DURING DEVELOPMENT
+                         LinkedIn Microservices
+================================================================================
+
+
+--------------------------------------------------------------------------------
+ #1  Kafka Deserialization - ClassNotFoundException
+--------------------------------------------------------------------------------
+
+  ERROR:
+    org.springframework.messaging.converter.MessageConversionException:
+    failed to resolve class name. Class not found
+    [com.aimed.linkedin.posts_service.event.PostCreatedEvent]
+
+  ROOT CAUSE:
+    Spring Kafka's JsonSerializer embeds the producer's fully qualified
+    class name in the Kafka message header (__TypeId__). When the
+    notification-service received the message, the JsonDeserializer
+    tried Class.forName("com.aimed.linkedin.posts_service.event.PostCreatedEvent"),
+    but the event class in notification-service was in a different package:
+      - Producer (posts-service):       com.aimed.linkedin.posts_service.event.PostCreatedEvent
+      - Consumer (notification-service): com.aimed.linkedin.post_service.PostCreatedEvent
+
+    The package mismatch caused the ClassNotFoundException.
+
+  FIX:
+    Moved the event classes in notification-service to match the exact
+    same package as the producer:
+      com.aimed.linkedin.posts_service.event.PostCreatedEvent
+      com.aimed.linkedin.posts_service.event.PostLikedEvent
+
+  FILES CHANGED:
+    - notification-service/src/main/java/com/aimed/linkedin/posts_service/event/PostCreatedEvent.java  (created)
+    - notification-service/src/main/java/com/aimed/linkedin/posts_service/event/PostLikedEvent.java    (created)
+    - Old classes under com.aimed.linkedin.post_service removed
+
+
+--------------------------------------------------------------------------------
+ #2  Kafka Deserialization - No Default Constructor (Jackson)
+--------------------------------------------------------------------------------
+
+  ERROR:
+    com.fasterxml.jackson.databind.exc.InvalidDefinitionException:
+    Cannot construct instance of PostCreatedEvent
+    (no Creators, like default constructor, exist):
+    cannot deserialize from Object value
+
+  ROOT CAUSE:
+    The event classes only had Lombok's @Data and @Builder annotations.
+    @Builder generates a package-private all-args constructor but NO
+    no-arg (default) constructor. Jackson needs a no-arg constructor to
+    instantiate the object and then populate fields via setters.
+
+  FIX:
+    Added @NoArgsConstructor (for Jackson deserialization) and
+    @AllArgsConstructor (required to keep @Builder functional) to both
+    event classes.
+
+    Before:
+      @Data
+      @Builder
+      public class PostCreatedEvent { ... }
+
+    After:
+      @Data
+      @Builder
+      @NoArgsConstructor
+      @AllArgsConstructor
+      public class PostCreatedEvent { ... }
+
+  FILES CHANGED:
+    - notification-service/.../posts_service/event/PostCreatedEvent.java
+    - notification-service/.../posts_service/event/PostLikedEvent.java
+
+
+--------------------------------------------------------------------------------
+ #3  Feign Client - 405 Method Not Allowed
+--------------------------------------------------------------------------------
+
+  ERROR:
+    feign.FeignException$MethodNotAllowed: [405] during [GET] to
+    [http://connections-service/connections/core/first-connections]
+
+  ROOT CAUSE:
+    Two problems combined:
+
+    1. The Feign client's getMyFirstConnections(Long userId) had no
+       @PathVariable or @RequestParam on the userId parameter. Without
+       an annotation, Feign treats it as a request body, which changes
+       the HTTP method semantics and causes a 405 on a GET endpoint.
+
+    2. The connections controller's GET /core/first-connections endpoint
+       took no parameters -- it read userId from UserContextHolder
+       (populated by HTTP request headers). But the Feign call came from
+       a Kafka consumer (no HTTP request context), so UserContextHolder
+       had no userId.
+
+  FIX:
+    - Added a new endpoint in ConnectionsController:
+        GET /core/first-connections/{userId}
+      that accepts userId as a @PathVariable.
+
+    - Added an overloaded method in ConnectionsService:
+        getFirstDegreeConnections(Long userId)
+      that directly queries by the provided userId.
+
+    - Updated the Feign client to use the new path and @PathVariable:
+        @GetMapping("/core/first-connections/{userId}")
+        List<PersonDto> getFirstConnectionsOfUser(@PathVariable Long userId)
+
+  FILES CHANGED:
+    - connections-service/.../controller/ConnectionsController.java
+    - connections-service/.../service/ConnectionsService.java
+    - notification-service/.../feign/ConnectionsFeignClient.java
+
+
+--------------------------------------------------------------------------------
+ #3 (Alternate Fix)  Feign Client - Using @RequestHeader Instead
+--------------------------------------------------------------------------------
+
+  CONTEXT:
+    Instead of the @PathVariable approach in #3, an alternate fix was
+    used: sending the userId as a request header via @RequestHeader
+    and calling the original controller endpoint that takes NO parameters.
+
+  FEIGN CLIENT:
+    @GetMapping("/core/first-connections")
+    List<PersonDto> getFirstConnectionsOfUser(@RequestHeader("X-User-Id") Long userId);
+
+    - Calls the original endpoint: GET /core/first-connections
+    - The controller accepts NO parameters
+    - userId is passed as an HTTP header, NOT a path variable
+
+  CONNECTIONS CONTROLLER (unchanged, no parameters):
+    @GetMapping("/first-connections")
+    public ResponseEntity<List<Person>> getMyFirstConnections() {
+        return ResponseEntity.ok(connectionsService.getMyFirstDegreeConnections());
+    }
+
+  HOW IT WORKS:
+    The connections-service has a UserInterceptor that intercepts every
+    incoming HTTP request:
+
+      1. Feign sends userId as "X-User-Id" header in the HTTP request
+      2. UserInterceptor reads the "X-User-Id" header
+      3. Stores it in UserContextHolder via setCurrentUserId()
+      4. Controller calls service.getMyFirstDegreeConnections()
+      5. Service reads userId from UserContextHolder.getCurrentUserId()
+
+    Flow:
+      Feign @RequestHeader("X-User-Id")
+        -> HTTP header in request
+          -> UserInterceptor reads header -> sets UserContextHolder
+            -> Controller (no params) -> Service -> UserContextHolder.getCurrentUserId()
+
+  WHY THIS WORKS & IS CLEANER:
+    - Consistent with how the API gateway propagates user identity
+      (gateway sets X-User-Id header -> all services read it via
+      their UserInterceptor)
+    - No need to create a separate endpoint or overloaded service method
+    - The existing parameterless controller endpoint works as-is
+
+  FILES CHANGED:
+    - notification-service/.../feign/ConnectionsFeignClient.java
+      (used @RequestHeader("X-User-Id") instead of @PathVariable)
+
+
+--------------------------------------------------------------------------------
+ #4  API Gateway - Stale Route Config (Wrong Service Matched)
+--------------------------------------------------------------------------------
+
+  ERROR:
+    POST /api/v1/connections/core/2 was routed to posts-service instead
+    of connections-service. Gateway log showed:
+      Route matched: posts-service
+      Pattern "/api/v1/**" matches against value "/api/v1/connections/core/2"
+
+  ROOT CAUSE:
+    The running API gateway was using an older config where posts-service
+    had a catch-all pattern Path=/api/v1/**. The updated config with
+    specific paths (/api/v1/posts/**, /api/v1/connections/**) was not
+    picked up because the gateway had not been restarted.
+
+  FIX:
+    Restarted the api-gateway so it loaded the updated application.yaml
+    with the correct route patterns.
+
+
+--------------------------------------------------------------------------------
+ #5  API Gateway - UnknownHostException (Eureka Hostname vs IP)
+--------------------------------------------------------------------------------
+
+  ERROR:
+    java.net.UnknownHostException: Failed to resolve
+    'SOLV-LT-CT1255.solvezy.com' [A(1)] after 2 queries
+
+    The load balancer resolved connections-service to the machine's
+    hostname instead of its IP address:
+      lb://CONNECTIONS-SERVICE -> http://SOLV-LT-CT1255.solvezy.com:9030
+
+  ROOT CAUSE:
+    The connections-service was missing eureka.instance.prefer-ip-address
+    in its application.yaml. Without this, Eureka registers the service
+    with the machine's hostname. Since the hostname is not resolvable
+    via DNS, the gateway couldn't connect.
+
+    The api-gateway already had this setting, but connections-service
+    did not.
+
+  IMPORTANT NOTE:
+    After adding the setting and restarting connections-service, the
+    error persisted because the api-gateway had cached the old Eureka
+    registry (with hostname). Eureka clients refresh their cache every
+    ~30 seconds. Either restart the api-gateway or wait for the cache
+    to refresh.
+
+  FIX:
+    Added to connections-service/src/main/resources/application.yaml:
+
+      eureka:
+        instance:
+          prefer-ip-address: true
+
+    Then restarted both connections-service AND api-gateway.
+
+    All services that register with Eureka should have this setting
+    to avoid similar issues.
+
+  FILES CHANGED:
+    - connections-service/src/main/resources/application.yaml
+
+
+--------------------------------------------------------------------------------
+ #6  404 Not Found - Incorrect API Path (Missing Action in URL)
+--------------------------------------------------------------------------------
+
+  ERROR:
+    {
+      "timestamp": "2026-03-22T18:17:05.355Z",
+      "status": 404,
+      "error": "Not Found",
+      "path": "/connections/core/2"
+    }
+
+  ROOT CAUSE:
+    The curl was hitting POST /api/v1/connections/core/2 which resolved
+    to POST /connections/core/2 after StripPrefix. But no endpoint
+    exists for POST /core/{id} in ConnectionsController.
+
+    The available POST endpoints are:
+      - POST /core/request/{userId}  (send connection request)
+      - POST /core/accept/{userId}   (accept connection request)
+      - POST /core/reject/{userId}   (reject connection request)
+
+  FIX:
+    Used the correct URL with the action included:
+      POST http://localhost:8080/api/v1/connections/core/request/2
+
+
+--------------------------------------------------------------------------------
+ #7  Kafka Deserialization - ClassNotFoundException (Connection Events)
+--------------------------------------------------------------------------------
+
+  ERROR:
+    ClassNotFoundException:
+    com.aimed.linkedin.connections_service.event.SendConnectionRequestEvent
+
+    Same type of error as #1 but for connection events instead of
+    post events.
+
+  ROOT CAUSE:
+    Package name mismatch between producer and consumer:
+      - Producer (connections-service): com.aimed.linkedin.connections_service.event
+      - Consumer (notification-service): com.aimed.linkedin.connection_service.event
+
+    Note the difference: "connections_service" (with 's') vs
+    "connection_service" (without 's').
+
+  FIX:
+    1. Moved event classes in notification-service to the correct package:
+         com.aimed.linkedin.connections_service.event.SendConnectionRequestEvent
+         com.aimed.linkedin.connections_service.event.AcceptConnectionRequestEvent
+
+    2. Added @NoArgsConstructor and @AllArgsConstructor annotations
+       (same Jackson deserialization fix as #2).
+
+    3. Deleted old classes from the wrong package
+       (com.aimed.linkedin.connection_service.event).
+
+  FILES CHANGED:
+    - notification-service/.../connections_service/event/SendConnectionRequestEvent.java  (created)
+    - notification-service/.../connections_service/event/AcceptConnectionRequestEvent.java (created)
+    - notification-service/.../connection_service/event/ (old files deleted)
+
+
+================================================================================
+                         END OF ERROR LOG
+================================================================================

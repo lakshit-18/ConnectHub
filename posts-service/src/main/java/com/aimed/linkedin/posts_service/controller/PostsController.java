@@ -1,5 +1,6 @@
 package com.aimed.linkedin.posts_service.controller;
 
+import com.aimed.linkedin.posts_service.auth.UserContextHolder;
 import com.aimed.linkedin.posts_service.dto.PostCreateRequestDto;
 import com.aimed.linkedin.posts_service.dto.PostDto;
 import com.aimed.linkedin.posts_service.service.PostsService;
@@ -19,13 +20,14 @@ public class PostsController {
     private final PostsService postsService;
 
     @PostMapping
-    public ResponseEntity<PostDto> createPost(@RequestBody PostCreateRequestDto postDto, HttpServletRequest httpServletRequest) {
-        PostDto createdPost = postsService.createPost(postDto, 1L);
+    public ResponseEntity<PostDto> createPost(@RequestBody PostCreateRequestDto postDto) {
+        PostDto createdPost = postsService.createPost(postDto);
         return new ResponseEntity<>(createdPost, HttpStatus.CREATED);
     }
 
     @GetMapping("/{postId}")
     public ResponseEntity<PostDto> getPost(@PathVariable Long postId) {
+        Long userId = UserContextHolder.getCurrentUserId();
         PostDto post = postsService.getPostById(postId);
         return post != null ? ResponseEntity.ok(post) : ResponseEntity.notFound().build();
     }
